@@ -1,0 +1,20 @@
+{
+  "name": "doc-scraper",
+  "version": "1.0.0",
+  "description": "",
+  "main": "scraper.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^0.21.1",
+    "cheerio": "^1.0.0-rc.5",
+    "csv-write-stream": "^2.0.0",
+    "json2csv": "^5.0.6",
+    "jsonframe-cheerio": "^3.0.1",
+    "nodemon": "^2.0.7",
+    "superagent": "^6.1.0"
+  }
+}
