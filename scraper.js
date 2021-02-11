@@ -117,17 +117,19 @@ const outcsv = fs.createWriteStream('out.csv');
 for (let i = 1005; i < 1010; i++) {
 	getDIN('18A'+i)
 }
+getDIN('99A'+9999)
 
 var parseHTML = function(html) {
 	console.log('parsing')
-	console.log(html)
+	// console.log(html)
 	let $ = cheerio.load(html);
 	jsonframe($); // initializes the plugin
 
 	var inmate = $('#content').scrape(inmateformSentence)
 	console.log(inmate)
-	
-	outcsv.write(flattenCSV(inmate))
+	if (inmate.ID.DIN) {
+		outcsv.write(flattenCSV(inmate))
+	}
 }
 
 var flattenCSV = function(data) {
@@ -139,7 +141,7 @@ var flattenCSV = function(data) {
              for(var i=0, l=cur.length; i<l; i++)
                  recurse(cur[i], prop + "[" + i + "]");
             if (l == 0)
-                result+= '[],';
+                result+= ',';
         } else {
             var isEmpty = true;
             for (var p in cur) {
@@ -152,7 +154,7 @@ var flattenCSV = function(data) {
     }
     recurse(data, "");
     // console.log("flattened "+result)
-    // result = result.slice(0, -1)
+    result = result.slice(0, -1)
     result += '\n'
     return result;
 }
