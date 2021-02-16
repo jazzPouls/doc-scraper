@@ -1,21 +1,15 @@
 let cheerio = require('cheerio');
 let jsonframe = require('jsonframe-cheerio');
 const axios = require('axios');
-const got = require('got')
-// const { Parser,transforms: { flatten }, } = require('json2csv');
 var fs = require('fs');
-var request = require('request');
 var sleep = require('sleep');
 var http = require('http');
 var https = require('https');
 http.globalAgent.maxSockets = 10;
 https.globalAgent.maxSockets = 10;
-// var csvWriter = require('csv-write-stream')
-
 
 var url = 'http://nysdoccslookup.doccs.ny.gov/GCA00P00/WIQ2/WINQ120';
-
-var receptionCenterCodes = 'ABCDEGHIJNPRSTXY'
+var receptionCenterCodes = 'ABCDEGHIJNPRSTXY';
 
 var inmateform = {
 	ID: {
@@ -59,7 +53,7 @@ var inmateform = {
 			class: "td[headers=class]"
 		}]
 	}
-}
+};
 
 var inmateformDates = {
 	ID: {
@@ -99,11 +93,11 @@ var inmateformDates = {
 	CRIME: {
 		_s:"table:eq(1)",
 		_d: [{
-			crime: "td[headers=crime] | trim,noescapchar",
-			class: "td[headers=class] | noescapchar"
+			crime: "td[headers=crime]",
+			class: "td[headers=class]"
 		}]
 	}
-}
+};
 
 var inmateformSentence = {
 	ID: {
@@ -129,11 +123,7 @@ var inmateformSentence = {
 			class: "td[headers=class]"
 		}]
 	}
-}
-
-
-
-
+};
 
 const myClient = axios.create({
   baseURL: url,
@@ -147,19 +137,29 @@ const myClient = axios.create({
 const outcsv = fs.createWriteStream('out.csv');
 var row = 0;
 
-const din18A = DIN(2018,'A');
+(async() => {
+	var sampleinmate = await getDIN('18A0001')
+	var props = flattenCsvProperties(sampleinmate)
+	console.log(props)	
+	await outcsv.write(props)
 
-var count = 0;
-for (const d of din18A) {
-	count++
-	getDIN(d)
-	if (count == 100) {
-		break;
+	const din18A = DIN(2018,'A');
+
+	var count = 0;
+	var inmate;
+	for (const d of din18A) {
+		count++;
+		inmate = getDIN(d);
+		if (count == 100) {
+			break;
+		}
 	}
-}
+
+})();
 
 
-// var tests = [1009]
+
+// var tests = ['0027']
 // for (let i in tests) {
 // 	getDIN('18A'+tests[i]);
 // }
@@ -169,6 +169,11 @@ for (const d of din18A) {
 // }
 
 
+
+
+
+
+
 async function getDIN(DIN) {
   try {
   	const data = {
@@ -176,8 +181,7 @@ async function getDIN(DIN) {
 		M12_SEL_DINI: DIN
 	};
     let res = await myClient.post('', new URLSearchParams(data));
-    parseHTML(res.data, DIN)
-
+    return parseHTML(res.data, DIN)
   } catch (err) {
   	console.log(DIN)
     console.error(err);
@@ -198,10 +202,20 @@ var parseHTML = function(html, din) {
 		var inmate = $('#content').scrape(inmateform)
 		// console.timeEnd('json');
 		// console.log(inmate)
-		inmate.SENTENCE.minSentence = parseSentence(inmate.SENTENCE.minSentence)
-		inmate.SENTENCE.maxSentence = parseSentence(inmate.SENTENCE.maxSentence)
+		try {
+			inmate.SENTENCE.minSentence = parseSentence(inmate.SENTENCE.minSentence)
+			inmate.SENTENCE.maxSentence = parseSentence(inmate.SENTENCE.maxSentence)
+		} catch (err) {
+			console.log(err)
+			console.log(html)
+			console.log(inmate)
+		}
+		for (let c of inmate.CRIME) {
+			c.crime = c.crime.replace(/,/g,' ')
+		}
 
 		outcsv.write(row++ +","+ flattenCSV(inmate));
+		return inmate
 	} else {
 		console.log(din + ' not found');
 	}
@@ -209,7 +223,7 @@ var parseHTML = function(html, din) {
 
 function* DIN(year,receptionCenterCode) {
 	var din = year.toString().slice(-2) + receptionCenterCode;
-	for (var i = 0; i < 9999; i++) {
+	for (var i = 1; i < 9999; i++) {
 		if (i < 1000) {
 			i = i.toString().padStart(4,'0');
 		}
@@ -223,11 +237,12 @@ var parseSentence = function(s) {
 	}
 	var nums = /\d+/g
 	var num = s.match(nums)
-	if (num.length != 3) {
+	if (!num || num.length != 3) {
 		console.log('ERROR IN SENTENCE DURATION FORMAT')
 		return ;
 	}
 	var dur = parseInt(num[0]) + parseInt(num[1])/12 + parseInt(num[2])/365
+	dur = Math.floor((dur*100))/100;
 	return dur
 }
 
@@ -261,11 +276,7 @@ var flattenCSV = function(data) {
     return result;
 }
 
-
-
-
-
-var flattenCsvProperties = function(data) {
+function flattenCsvProperties(data) {
     var result = "";
     function recurse (cur, prop) {
         if (Object(cur) !== cur) {
@@ -286,8 +297,6 @@ var flattenCsvProperties = function(data) {
         }
     }
     recurse(data, "");
-    result = result.slice(0, -1)
-    result += '\n'
     return result;
 }
 
