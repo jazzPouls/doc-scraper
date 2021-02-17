@@ -141,7 +141,7 @@ var row = 0;
 	var sampleinmate = await getDIN('18A0001')
 	var props = flattenCsvProperties(sampleinmate)
 	console.log(props)	
-	await outcsv.write(props)
+	await outcsv.write(props+'\n')
 
 	const din18A = DIN(2018,'A');
 
@@ -185,7 +185,7 @@ async function getDIN(DIN) {
   } catch (err) {
   	console.log(DIN)
     console.error(err);
-    console.log("%&%&$*#(*&%^%^%%%%^^^^^ ERROR ")
+    console.log("%&%xxx&$*#(*&%^%^%%%%^^^^^ ERROR ")
   }
 };
 
@@ -201,15 +201,9 @@ var parseHTML = function(html, din) {
 		jsonframe($); // initializes the plugin
 		var inmate = $('#content').scrape(inmateform)
 		// console.timeEnd('json');
-		// console.log(inmate)
-		try {
-			inmate.SENTENCE.minSentence = parseSentence(inmate.SENTENCE.minSentence)
-			inmate.SENTENCE.maxSentence = parseSentence(inmate.SENTENCE.maxSentence)
-		} catch (err) {
-			console.log(err)
-			console.log(html)
-			console.log(inmate)
-		}
+		inmate.ID.name = inmate.ID.name.replace(/(\w+),\s*(\w+)/,'$2 $1')
+		inmate.SENTENCE.minSentence = parseSentence(inmate.SENTENCE.minSentence)
+		inmate.SENTENCE.maxSentence = parseSentence(inmate.SENTENCE.maxSentence)
 		for (let c of inmate.CRIME) {
 			c.crime = c.crime.replace(/,/g,' ')
 		}
@@ -290,7 +284,7 @@ function flattenCsvProperties(data) {
             var isEmpty = true;
             for (var p in cur) {
                 isEmpty = false;
-                recurse(cur[p], prop ? prop+"."+p : p);
+                recurse(cur[p], p);
             }
             if (isEmpty && prop)
                 result+=",";
