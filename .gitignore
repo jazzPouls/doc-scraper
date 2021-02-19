@@ -1,5 +1,6 @@
 *.csv
 ignore
+todo.txt
 
 # Logs
 logs

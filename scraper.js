@@ -1,6 +1,7 @@
 let cheerio = require('cheerio');
 let jsonframe = require('jsonframe-cheerio');
 const axios = require('axios');
+var qs = require('qs');
 var fs = require('fs');
 var sleep = require('sleep');
 var http = require('http');
@@ -10,6 +11,7 @@ https.globalAgent.maxSockets = 10;
 
 var url = 'http://nysdoccslookup.doccs.ny.gov/GCA00P00/WIQ2/WINQ120';
 var receptionCenterCodes = 'ABCDEGHIJNPRSTXY';
+var csvHeader = 'DIN,name,sex,DOB,race,custodyStatus,housing,dateReceivedOriginal,dateReceivedCurrent,admissionType,county,latestReleaseDate,minSentence,maxSentence,earliestRelaseDate,earliestRelaseType,paroleHearingDate,paroleHearingType,paroleEligibilityDate,conditionalReleaseDate,maxExpirationDate,maxExpirationDateParole,postReleaseMaxExpiration,paroleBoardDischargeDate,crime,class,crime,class,crime,class,crime,class,'
 
 var inmateform = {
 	ID: {
@@ -125,6 +127,7 @@ var inmateformSentence = {
 	}
 };
 
+
 const myClient = axios.create({
   baseURL: url,
   headers: {
@@ -135,13 +138,15 @@ const myClient = axios.create({
 })
 
 const outcsv = fs.createWriteStream('out.csv');
+// const sample100res = fs.createWriteStream('sample100res.txt');
 var row = 0;
 
 (async() => {
-	var sampleinmate = await getDIN('18A0001')
-	var props = flattenCsvProperties(sampleinmate)
-	console.log(props)	
-	await outcsv.write(props+'\n')
+	// var sampleinmate = await fetchDINResponse('18A0001')
+	// console.log(sampleinmate)
+	// var props = flattenCsvProperties(sampleinmate)
+	// console.log(props)	
+	// await outcsv.write(props+'\n')
 
 	const din18A = DIN(2018,'A');
 
@@ -149,13 +154,20 @@ var row = 0;
 	var inmate;
 	for (const d of din18A) {
 		count++;
-		inmate = getDIN(d);
+		var html = await fetchDINResponse(d);
+		parseHTML(html.data,d)
 		if (count == 100) {
 			break;
 		}
 	}
 
 })();
+
+// async function addInmate(din) {
+// 	var res = await fetchDINResponse(din);
+// 	var parsed = parseHTML(res.data, din)
+
+// }
 
 
 
@@ -174,27 +186,29 @@ var row = 0;
 
 
 
-async function getDIN(DIN) {
+async function fetchDINResponse(DIN) {
   try {
   	const data = {
 		K01: 'WINQ120',
 		M12_SEL_DINI: DIN
 	};
-    let res = await myClient.post('', new URLSearchParams(data));
-    return parseHTML(res.data, DIN)
+    var res =  await axios.post(url, new URLSearchParams(data));
+	return res
+	// console.log(res)
   } catch (err) {
-  	console.log(DIN)
-    console.error(err);
-    console.log("%&%xxx&$*#(*&%^%^%%%%^^^^^ ERROR ")
+  	console.log("%%%%%%%% Error fetching: " + DIN)
+	//   console.log(res)
+	  console.error(err.code);
+	
+    console.log("%&%xxx&$*#(*&%^%^%%%%^^^^^ ERROR " + DIN)
   }
 };
 
 
 
 var parseHTML = function(html, din) {
-
-	var successRegex = /id="t1a"/;
-	if (successRegex.test(html)) {
+	var successregex = /headers="t1a"/g;
+	if (successregex.test(html)) {
 		// console.log(html)
 		let $ = cheerio.load(html);
 		// console.time('json');
@@ -207,11 +221,12 @@ var parseHTML = function(html, din) {
 		for (let c of inmate.CRIME) {
 			c.crime = c.crime.replace(/,/g,' ')
 		}
-
+		console.log(flattenCsvProperties(inmate));
 		outcsv.write(row++ +","+ flattenCSV(inmate));
 		return inmate
 	} else {
 		console.log(din + ' not found');
+		console.log(html)
 	}
 }
 
@@ -242,7 +257,7 @@ var parseSentence = function(s) {
 
 var flattenCSV = function(data) {
     var result = '';
-    function recurse (cur) {
+    function recurse(cur) {
     	if (Object(cur) !== cur) {
     		result += cur + ',';
     	} else if (Array.isArray(cur)) {
@@ -272,7 +287,7 @@ var flattenCSV = function(data) {
 
 function flattenCsvProperties(data) {
     var result = "";
-    function recurse (cur, prop) {
+    function recurse(cur, prop) {
         if (Object(cur) !== cur) {
             result += prop + ",";
         } else if (Array.isArray(cur)) {
@@ -286,7 +301,7 @@ function flattenCsvProperties(data) {
                 isEmpty = false;
                 recurse(cur[p], p);
             }
-            if (isEmpty && prop)
+            if (isEmpty)
                 result+=",";
         }
     }
