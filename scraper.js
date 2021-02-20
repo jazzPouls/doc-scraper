@@ -3,6 +3,7 @@ let jsonframe = require('jsonframe-cheerio');
 const axios = require('axios');
 var qs = require('qs');
 var fs = require('fs');
+const {default: PQueue} = require('p-queue');
 var sleep = require('sleep');
 var http = require('http');
 var https = require('https');
@@ -11,8 +12,7 @@ https.globalAgent.maxSockets = 10;
 
 var url = 'http://nysdoccslookup.doccs.ny.gov/GCA00P00/WIQ2/WINQ120';
 var receptionCenterCodes = 'ABCDEGHIJNPRSTXY';
-var csvHeader = 'DIN,name,sex,DOB,race,custodyStatus,housing,dateReceivedOriginal,dateReceivedCurrent,admissionType,county,latestReleaseDate,minSentence,maxSentence,earliestRelaseDate,earliestRelaseType,paroleHearingDate,paroleHearingType,paroleEligibilityDate,conditionalReleaseDate,maxExpirationDate,maxExpirationDateParole,postReleaseMaxExpiration,paroleBoardDischargeDate,crime,class,crime,class,crime,class,crime,class,'
-
+var csvHeader = 'DIN,name,sex,DOB,race,custodyStatus,housing,dateReceivedOriginal,dateReceivedCurrent,admissionType,county,latestReleaseDate,minSentence,maxSentence,earliestRelaseDate,earliestRelaseType,paroleHearingDate,paroleHearingType,paroleEligibilityDate,conditionalReleaseDate,maxExpirationDate,maxExpirationDateParole,postReleaseMaxExpiration,paroleBoardDischargeDate,crime,class,crime,class,crime,class,crime,class\n'
 var inmateform = {
 	ID: {
 		_s:"table:eq(0)",
@@ -56,7 +56,6 @@ var inmateform = {
 		}]
 	}
 };
-
 var inmateformDates = {
 	ID: {
 		_s:"table:eq(0)",
@@ -100,7 +99,6 @@ var inmateformDates = {
 		}]
 	}
 };
-
 var inmateformSentence = {
 	ID: {
 		_s:"table:eq(0)",
@@ -126,8 +124,6 @@ var inmateformSentence = {
 		}]
 	}
 };
-
-
 const myClient = axios.create({
   baseURL: url,
   headers: {
@@ -135,104 +131,102 @@ const myClient = axios.create({
             'Accept-Encoding': '',
             'Accept-Language': 'en-US,en;q=0.8'
         }
-})
-
-const outcsv = fs.createWriteStream('out.csv');
+});
 // const sample100res = fs.createWriteStream('sample100res.txt');
-var row = 0;
 
 (async() => {
-	// var sampleinmate = await fetchDINResponse('18A0001')
-	// console.log(sampleinmate)
-	// var props = flattenCsvProperties(sampleinmate)
-	// console.log(props)	
-	// await outcsv.write(props+'\n')
 
-	const din18A = DIN(2018,'A');
+	const outcsv = fs.createWriteStream('out.csv');
+	outcsv.write(csvHeader);
+	const pqueue = new PQueue({concurrency: 200, autoStart: true});
+	const din18A = DIN(2018,'A',1800,2000);
+	// const din18A = DIN(2018,'A',4900,9999);
 
 	var count = 0;
-	var inmate;
+	console.time('test');
 	for (const d of din18A) {
 		count++;
-		var html = await fetchDINResponse(d);
-		parseHTML(html.data,d)
-		if (count == 100) {
+		(async () => {
+			try {
+				console.log('adding',d)
+				var s = await pqueue.add(async () => fetchDINResponse(d));
+				// var s = await fetchDINResponse(d);
+				var inmateCsv = handleDINResponse(s,d);
+				outcsv.write(inmateCsv)
+				console.log(d,' data written to csv')
+			} catch (err) {
+				console.log(err.message);
+				return;
+			}
+		})();
+		if (count == 2000) {
 			break;
 		}
 	}
+	(async () => {
+		console.log(`Size: ${pqueue.size}  Pending: ${pqueue.pending}`);
+		await pqueue.onIdle();
+		console.timeEnd('test');
+	})();
 
 })();
 
-// async function addInmate(din) {
-// 	var res = await fetchDINResponse(din);
-// 	var parsed = parseHTML(res.data, din)
-
-// }
-
-
-
-// var tests = ['0027']
-// for (let i in tests) {
-// 	getDIN('18A'+tests[i]);
-// }
-
-// for (let i = 0; i < 2; i++) {
-// 	getDIN('18A'+tests[i]);
-// }
-
-
-
-
-
-
+function handleDINResponse(res,din) {
+	var parsed = parseHTML(res.data, din);
+	return flattenCSV(parsed);
+}
 
 async function fetchDINResponse(DIN) {
-  try {
-  	const data = {
-		K01: 'WINQ120',
-		M12_SEL_DINI: DIN
-	};
-    var res =  await axios.post(url, new URLSearchParams(data));
-	return res
-	// console.log(res)
-  } catch (err) {
-  	console.log("%%%%%%%% Error fetching: " + DIN)
-	//   console.log(res)
-	  console.error(err.code);
-	
-    console.log("%&%xxx&$*#(*&%^%^%%%%^^^^^ ERROR " + DIN)
-  }
+	var tries = 0;
+	var retryTimes = 5;
+	console.log("fetching",DIN)
+	async function run() {
+		try {
+			const data = {
+				K01: 'WINQ120',
+				M12_SEL_DINI: DIN
+			};
+			var res = await myClient.post('', new URLSearchParams(data));
+			return res;
+		} catch (err) {
+			tries++;
+			console.log("ERROR: " +err.code + " " +DIN);
+			if (tries >= retryTimes) {
+				console.log(retryTimes,' FAILED ')
+				throw new Error;
+			} else {
+				console.log("RETRYING ", DIN)
+				return run();
+			}
+		}
+	}
+	return run();
 };
 
 
 
 var parseHTML = function(html, din) {
-	var successregex = /headers="t1a"/g;
-	if (successregex.test(html)) {
-		// console.log(html)
+	if (/headers="t1a"/.test(html)) {
 		let $ = cheerio.load(html);
-		// console.time('json');
-		jsonframe($); // initializes the plugin
+		jsonframe($);
 		var inmate = $('#content').scrape(inmateform)
-		// console.timeEnd('json');
-		inmate.ID.name = inmate.ID.name.replace(/(\w+),\s*(\w+)/,'$2 $1')
+		inmate.ID.name = inmate.ID.name.replace(/(.*),\s*(.*)/,'$2 $1')
 		inmate.SENTENCE.minSentence = parseSentence(inmate.SENTENCE.minSentence)
 		inmate.SENTENCE.maxSentence = parseSentence(inmate.SENTENCE.maxSentence)
 		for (let c of inmate.CRIME) {
 			c.crime = c.crime.replace(/,/g,' ')
 		}
-		console.log(flattenCsvProperties(inmate));
-		outcsv.write(row++ +","+ flattenCSV(inmate));
 		return inmate
 	} else {
 		console.log(din + ' not found');
-		console.log(html)
+		console.log(html.match(/<p class="err">(.*)<\/p>/)[1]);
+		throw new Error("DIN not found error");
 	}
 }
 
-function* DIN(year,receptionCenterCode) {
+function* DIN(year,receptionCenterCode,start=1,end=9999) {
 	var din = year.toString().slice(-2) + receptionCenterCode;
-	for (var i = 1; i < 9999; i++) {
+	for (var i = start; i < end; i++) {
 		if (i < 1000) {
 			i = i.toString().padStart(4,'0');
 		}
