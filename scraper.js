@@ -11,7 +11,8 @@ http.globalAgent.maxSockets = 10;
 https.globalAgent.maxSockets = 10;
 
 var url = 'http://nysdoccslookup.doccs.ny.gov/GCA00P00/WIQ2/WINQ120';
-var receptionCenterCodes = 'ABCDEGHIJNPRSTXY';
+// var receptionCenterCodes = 'ABCDEGHIJNPRSTXY';
+var receptionCenterCodes = 'A';
 var csvHeader = 'DIN,name,sex,DOB,race,custodyStatus,housing,dateReceivedOriginal,dateReceivedCurrent,admissionType,county,latestReleaseDate,minSentence,maxSentence,earliestRelaseDate,earliestRelaseType,paroleHearingDate,paroleHearingType,paroleEligibilityDate,conditionalReleaseDate,maxExpirationDate,maxExpirationDateParole,postReleaseMaxExpiration,paroleBoardDischargeDate,crime,class,crime,class,crime,class,crime,class\n'
 var inmateform = {
 	ID: {
@@ -139,28 +140,40 @@ const myClient = axios.create({
 	const outcsv = fs.createWriteStream('out.csv');
 	outcsv.write(csvHeader);
 	const pqueue = new PQueue({concurrency: 200, autoStart: true});
-	const din18A = DIN(2018,'A',1800,2000);
+	
 	// const din18A = DIN(2018,'A',4900,9999);
 
 	var count = 0;
 	console.time('test');
-	for (const d of din18A) {
-		count++;
-		(async () => {
-			try {
-				console.log('adding',d)
-				var s = await pqueue.add(async () => fetchDINResponse(d));
-				// var s = await fetchDINResponse(d);
-				var inmateCsv = handleDINResponse(s,d);
-				outcsv.write(inmateCsv)
-				console.log(d,' data written to csv')
-			} catch (err) {
-				console.log(err.message);
-				return;
+	for (let year = 2018; year < 2019; year++) {
+		for (let r = 0; r < receptionCenterCodes.length; r++) {
+			const din18 = DIN(2018,receptionCenterCodes.charAt(r),4900,4950);
+			var missed = new Array();
+			for (const d of din18) {
+				count++;
+				(async () => {
+					try {
+						console.log('adding',d)
+						var s = await pqueue.add(async () => fetchDINResponse(d));
+						// var s = await fetchDINResponse(d);
+						var parseResult = parseHTML(s.data,d);
+						if (parseResult.success) {
+							outcsv.write(parseResult.csv)					
+							console.log(d,' data written to csv')
+						} else {
+							missed.push(parseInt(d.slice(-4)));
+							missed.sort((a,b) => b-a);
+							// console.log(missed)
+						}
+					} catch (err) {
+						console.log(err.message);
+						return;
+					}
+				})();
+				if (count == 2000) {
+					break;
+				}
 			}
-		})();
-		if (count == 2000) {
-			break;
 		}
 	}
 	(async () => {
@@ -171,10 +184,10 @@ const myClient = axios.create({
 
 })();
 
-function handleDINResponse(res,din) {
-	var parsed = parseHTML(res.data, din);
-	return flattenCSV(parsed);
-}
+// function handleDINResponse(res,din) {
+// 	var parsed = parseHTML(res.data, din);
+// 	return flattenCSV(parsed);
+// }
 
 async function fetchDINResponse(DIN) {
 	var tries = 0;
@@ -203,25 +216,27 @@ async function fetchDINResponse(DIN) {
 	return run();
 };
 
-
-
 var parseHTML = function(html, din) {
-	if (/headers="t1a"/.test(html)) {
-		let $ = cheerio.load(html);
-		jsonframe($);
-		var inmate = $('#content').scrape(inmateform)
-		inmate.ID.name = inmate.ID.name.replace(/(.*),\s*(.*)/,'$2 $1')
-		inmate.SENTENCE.minSentence = parseSentence(inmate.SENTENCE.minSentence)
-		inmate.SENTENCE.maxSentence = parseSentence(inmate.SENTENCE.maxSentence)
-		for (let c of inmate.CRIME) {
-			c.crime = c.crime.replace(/,/g,' ')
-		}
-		return inmate
-	} else {
-		console.log(din + ' not found');
-		console.log(html.match(/<p class="err">(.*)<\/p>/)[1]);
-		throw new Error("DIN not found error");
+	var res = {
+		success: false,
+		csv: null
+	};
+	if (!/headers="t1a"/.test(html)) {
+		console.log(din,' not found: ',html.match(/<p class="err">(.*)<\/p>/)[1]);
+		return res;
 	}
+	res.success = true;
+	let $ = cheerio.load(html);
+	jsonframe($);
+	var inmate = $('#content').scrape(inmateform)
+	inmate.ID.name = inmate.ID.name.replace(/(.*),\s*(.*)/,'$2 $1')
+	inmate.SENTENCE.minSentence = parseSentence(inmate.SENTENCE.minSentence)
+	inmate.SENTENCE.maxSentence = parseSentence(inmate.SENTENCE.maxSentence)
+	for (let c of inmate.CRIME) {
+		c.crime = c.crime.replace(/,/g,' ')
+	}
+	res.csv = flattenCSV(inmate);
+	return res;
 }
 
 function* DIN(year,receptionCenterCode,start=1,end=9999) {
