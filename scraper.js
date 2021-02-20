@@ -163,6 +163,9 @@ const myClient = axios.create({
 						} else {
 							missed.push(parseInt(d.slice(-4)));
 							missed.sort((a,b) => b-a);
+							if (missed.length >= 5 && missed[0] - missed[5] < 10) {
+								
+							}
 							// console.log(missed)
 						}
 					} catch (err) {
