@@ -2,17 +2,15 @@ let cheerio = require('cheerio');
 let jsonframe = require('jsonframe-cheerio');
 const axios = require('axios');
 var fs = require('fs');
-// var sleep = require('sleep');
 var http = require('http');
 var https = require('https');
 http.globalAgent.maxSockets = 10;
 https.globalAgent.maxSockets = 10;
 
 var url = 'http://nysdoccslookup.doccs.ny.gov/GCA00P00/WIQ2/WINQ120';
-// var receptionCenterCodes = 'I';
-var receptionCenterCodes = 'ABDGHJNPRSTXY';
+var receptionCenterCodes = 'ABDGR';
 // var fullReceptionCenterCodes = 'ABCDEGHIJNPRSTXY';
-var csvHeader = 'DIN,name,sex,DOB,race,custodyStatus,housing,dateReceivedOriginal,dateReceivedCurrent,admissionType,county,latestReleaseDate,minSentence,maxSentence,earliestRelaseDate,earliestRelaseType,paroleHearingDate,paroleHearingType,paroleEligibilityDate,conditionalReleaseDate,maxExpirationDate,maxExpirationDateParole,postReleaseMaxExpiration,paroleBoardDischargeDate,crime,class,crime,class,crime,class,crime,class\n'
+var csvHeader = 'DIN,name,sex,DOB,race,custodyStatus,housing,dateReceivedOriginal,dateReceivedCurrent,admissionType,county,latestReleaseDate,minSentence,maxSentence,earliestRelaseDate,earliestRelaseType,paroleHearingDate,paroleHearingType,paroleEligibilityDate,conditionalReleaseDate,maxExpirationDate,maxExpirationDateParole,postReleaseMaxExpiration,paroleBoardDischargeDate,crime1,class1,crime2,class2,crime3,class3,crime4,class4\n'
 var inmateform = {
 	ID: {
 		_s:"table:eq(0)",
@@ -68,8 +66,9 @@ const myClient = axios.create({
 var FAILED_FETCHES = new Array();
 
 (async () => {
-	console.time('test');
-	for (let year = 2016; year > 2010; year--) {
+	for (let year = 2020; year >= 2000; year--) {
+		console.time('test');
+		console.log(`starting ${year}`)
 		var date = new Date(); 
 		var time = "@"  
                 + date.getHours() + ":"  
@@ -101,16 +100,18 @@ var FAILED_FETCHES = new Array();
 					}
 				});
 				outcsv.write(csvs);
-				console.timeLog('test');
+				
 				if (m.length >= 5 && m[m.length-1] == 99 && m[m.length-5] == 95) {
-					console.log(`end of ${prefix} found`)
 					break;
 				}
 				await sleep(500);
 			}
 		}
+		console.timeEnd('test');
+		console.log(FAILED_FETCHES);
+		await sleep(60000);
 	}
-	console.log(FAILED_FETCHES)
+	console.log(FAILED_FETCHES);
 })();
 
 async function scrapeDIN(din) {
@@ -126,7 +127,7 @@ async function scrapeDIN(din) {
 async function fetchDINResponse(din) {
 	var tries = 0;
 	var retryTimes = 5;
-	var touts = [10000,20000,60000,100000,100000];
+	var touts = [10000,10000,20000,100000,100000];
 	async function run() {
 		try {
 			const data = {
@@ -137,7 +138,7 @@ async function fetchDINResponse(din) {
 			return res;
 		} catch (err) {
 			tries++;
-			console.log("ERROR: " + err.code + " " +din);
+			// console.log("ERROR: " + err.code + " " +din);
 			if (tries >= retryTimes) {
 				console.log(retryTimes,' TRIES FAILED ', din)
 				FAILED_FETCHES.push(din);
@@ -145,9 +146,9 @@ async function fetchDINResponse(din) {
 			} else {
 				if (err.code == 'ECONNABORTED') {
 					// console.log(`RETRYING ${din} with longgggg timeout`)
-					console.log(`RETRYING ${din} with timeout ${touts[tries]}ms`)
+					// console.log(`RETRYING ${din} with timeout ${touts[tries]}ms`)
 				} else {
-					console.log("RETRYING ", din)
+					console.log(`ERROR: ${err.code} RETRYING ${din}`);
 				}
 				return run();
 			}
@@ -156,7 +157,7 @@ async function fetchDINResponse(din) {
 	return run();
 };
 
-var parseHTML = function(html, din) {
+function parseHTML(html, din) {
 	if (!/headers="t1a"/.test(html)) {
 		// console.log(din,' not found: ',html.match(/<p class="err">(.*)<\/p>/)[1]);
 		return null;
@@ -177,14 +178,16 @@ var parseHTML = function(html, din) {
 	return flattenCSV(inmate);
 }
 
-var parseSentence = function(s) {
+function parseSentence(s) {
 	if (/LIFE/.test(s)) {
 		return 100;
 	}
 	var nums = /\d+/g
 	var num = s.match(nums)
-	if (!num || num.length != 3) return;
-	var dur = parseInt(num[0]) + parseInt(num[1])/12 + parseInt(num[2])/365
+	if (!num || num.length != 3) {
+		return;
+	}
+	var dur = parseInt(num[0]) + parseInt(num[1])/12 + parseInt(num[2])/365;
 	dur = Math.floor((dur*100))/100;
 	return dur
 }
@@ -193,7 +196,7 @@ var flattenCSV = function(data) {
     var result = '';
     function recurse(cur) {
     	if (Object(cur) !== cur) {
-			if (!cur || /  /.test(cur) || /^\s*$/.test(cur)) {
+			if (/  /.test(cur) || /^\s*$/.test(cur)) {
                 result += ",";
             } else {
                 result += cur + ",";
@@ -221,40 +224,6 @@ var flattenCSV = function(data) {
     result = result.slice(0, -1)
     result += '\n'
     return result;
-}
-
-function flattenCsvProperties(data) {
-    var result = "";
-    function recurse(cur, prop) {
-        if (Object(cur) !== cur) {
-            result += prop + ",";
-        } else if (Array.isArray(cur)) {
-            for(var i=0, l=cur.length; i<l; i++)
-                 recurse(cur[i], prop + "[" + i + "]");
-            if (l == 0)
-                result+= ',';
-        } else {
-            var isEmpty = true;
-            for (var p in cur) {
-                isEmpty = false;
-                recurse(cur[p], p);
-            }
-            if (isEmpty)
-                result+=",";
-        }
-    }
-    recurse(data, "");
-    return result;
-}
-
-function* DIN(year,receptionCenterCode,start=1,end=9999) {
-	var din = year.toString().slice(-2) + receptionCenterCode;
-	for (var i = start; i < end; i++) {
-		if (i < 1000) {
-			i = i.toString().padStart(4,'0');
-		}
-		yield din + i.toString()
-	}
 }
 
 function sleep(ms) {
