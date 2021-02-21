@@ -2,15 +2,16 @@ let cheerio = require('cheerio');
 let jsonframe = require('jsonframe-cheerio');
 const axios = require('axios');
 var fs = require('fs');
-var sleep = require('sleep');
+// var sleep = require('sleep');
 var http = require('http');
 var https = require('https');
 http.globalAgent.maxSockets = 10;
 https.globalAgent.maxSockets = 10;
 
 var url = 'http://nysdoccslookup.doccs.ny.gov/GCA00P00/WIQ2/WINQ120';
-var receptionCenterCodes = 'BCDEGHIJNPRSTXY';
-// var receptionCenterCodes = 'A';
+// var receptionCenterCodes = 'I';
+var receptionCenterCodes = 'ABDGHJNPRSTXY';
+// var fullReceptionCenterCodes = 'ABCDEGHIJNPRSTXY';
 var csvHeader = 'DIN,name,sex,DOB,race,custodyStatus,housing,dateReceivedOriginal,dateReceivedCurrent,admissionType,county,latestReleaseDate,minSentence,maxSentence,earliestRelaseDate,earliestRelaseType,paroleHearingDate,paroleHearingType,paroleEligibilityDate,conditionalReleaseDate,maxExpirationDate,maxExpirationDateParole,postReleaseMaxExpiration,paroleBoardDischargeDate,crime,class,crime,class,crime,class,crime,class\n'
 var inmateform = {
 	ID: {
@@ -55,95 +56,29 @@ var inmateform = {
 		}]
 	}
 };
-var inmateformDates = {
-	ID: {
-		_s:"table:eq(0)",
-		_d: {
-			DIN: "td[headers=t1a]",
-			name: "td[headers=t1b]",
-			sex: "td[headers=t1c]",
-			DOB: "td[headers=t1d] < date",
-			race: "td[headers=t1e]",
-			custodyStatus: "td[headers=t1f]",
-			housing: "td[headers=t1g]",
-			dateReceivedOriginal: "td[headers=t1h] < date",
-			dateReceivedCurrent: "td[headers=t1i] < date",
-			admissionType: "td[headers=t1j]",
-			county: "td[headers=t1k]",
-			latestReleaseDate: "td[headers=t1l]"
-		}
-	},
-	SENTENCE: {
-		_s:"table:eq(2)",
-		_d: {
-			minSentence: "td[headers=t3a]",
-			maxSentence: "td[headers=t3b]",
-			earliestRelaseDate: "td[headers=t3c] < date",
-			earliestRelaseType: "td[headers=t3d]",
-			paroleHearingDate: "td[headers=t3e] < date",
-			paroleHearingType: "td[headers=t3f]",
-			paroleEligibilityDate: "td[headers=t3g] < date",
-			conditionalReleaseDate: "td[headers=t3h] < date",
-			maxExpirationDate: "td[headers=t3i] < date",
-			maxExpirationDateParole: "td[headers=t3j] < date",
-			postReleaseMaxExpiration: "td[headers=t3k] < date",
-			paroleBoardDischargeDate: "td[headers=t3l] < date"
-		}
-	},
-	CRIME: {
-		_s:"table:eq(1)",
-		_d: [{
-			crime: "td[headers=crime]",
-			class: "td[headers=class]"
-		}]
-	}
-};
-var inmateformSentence = {
-	ID: {
-		_s:"table:eq(0)",
-		_d: {
-			DIN: "td[headers=t1a]",
-			custodyStatus: "td[headers=t1f]",
-			dateReceivedOriginal: "td[headers=t1h]",
-			latestReleaseDateType: "td[headers=t1l]"
-		}
-	},
-	SENTENCE: {
-		_s:"table:eq(2)",
-		_d: {
-			minSentence: "td[headers=t3a]",
-			maxSentence: "td[headers=t3b]"
-		}
-	},
-	CRIME: {
-		_s:"table:eq(1)",
-		_d: [{
-			crime: "td[headers=crime]",
-			class: "td[headers=class]"
-		}]
-	}
-};
 const myClient = axios.create({
   baseURL: url,
-  timeout: 2000,
+  timeout: 10000,
   headers: {
             'Connection': 'keep-alive',
             'Accept-Encoding': '',
             'Accept-Language': 'en-US,en;q=0.8'
         }
 });
-// const sample100res = fs.createWriteStream('sample100res.txt');
-
-
 
 (async () => {
-	const outcsv = fs.createWriteStream('out.csv');
-	outcsv.write(csvHeader);
 	console.time('test');
-	for (let year = 2018; year < 2019; year++) {
+	for (let year = 2017; year > 2016; year--) {
+		var date = new Date(); 
+		var time = "@"  
+                + date.getHours() + ":"  
+                + date.getMinutes() + ":" 
+                + date.getSeconds();
+		const outcsv = fs.createWriteStream(`data/inmates${year}${time}.csv`);
+		outcsv.write(csvHeader);
 		for (let r = 0; r < receptionCenterCodes.length; r++) {
+			var prefix = year.toString().slice(-2) + receptionCenterCodes.charAt(r);
 			for (let offset = 0; offset < 9999; offset += 100) {
-				var prefix = year.toString().slice(-2) + receptionCenterCodes.charAt(r);
 				console.time('fetch100');
 				var fetchPromises = [...Array(100)].map((_,i) => {
 					if (offset >= 1000) {
@@ -169,10 +104,10 @@ const myClient = axios.create({
 					break;
 				}
 				console.timeLog('test');
+				await sleep(500);
 			}
 		}
 	}
-	console.timeLog('test');
 })();
 
 async function scrapeDIN(din) {
@@ -216,6 +151,10 @@ var parseHTML = function(html, din) {
 		console.log(din,' not found: ',html.match(/<p class="err">(.*)<\/p>/)[1]);
 		return null;
 	}
+	if (/NOT ON LOCATOR/.test(html)) {
+		console.log(din,' not found: ** NOT ON LOCATOR **');
+		return null;
+	}
 	let $ = cheerio.load(html);
 	jsonframe($);
 	var inmate = $('#content').scrape(inmateform)
@@ -230,14 +169,11 @@ var parseHTML = function(html, din) {
 
 var parseSentence = function(s) {
 	if (/LIFE/.test(s)) {
-		return 'LIFE';
+		return 100;
 	}
 	var nums = /\d+/g
 	var num = s.match(nums)
-	if (!num || num.length != 3) {
-		console.log('ERROR IN SENTENCE DURATION FORMAT')
-		return ;
-	}
+	if (!num || num.length != 3) return;
 	var dur = parseInt(num[0]) + parseInt(num[1])/12 + parseInt(num[2])/365
 	dur = Math.floor((dur*100))/100;
 	return dur
@@ -310,3 +246,9 @@ function* DIN(year,receptionCenterCode,start=1,end=9999) {
 		yield din + i.toString()
 	}
 }
+
+function sleep(ms) {
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+}   
