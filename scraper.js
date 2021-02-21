@@ -11,8 +11,8 @@ http.globalAgent.maxSockets = 10;
 https.globalAgent.maxSockets = 10;
 
 var url = 'http://nysdoccslookup.doccs.ny.gov/GCA00P00/WIQ2/WINQ120';
-// var receptionCenterCodes = 'ABCDEGHIJNPRSTXY';
-var receptionCenterCodes = 'A';
+var receptionCenterCodes = 'BCDEGHIJNPRSTXY';
+// var receptionCenterCodes = 'A';
 var csvHeader = 'DIN,name,sex,DOB,race,custodyStatus,housing,dateReceivedOriginal,dateReceivedCurrent,admissionType,county,latestReleaseDate,minSentence,maxSentence,earliestRelaseDate,earliestRelaseType,paroleHearingDate,paroleHearingType,paroleEligibilityDate,conditionalReleaseDate,maxExpirationDate,maxExpirationDateParole,postReleaseMaxExpiration,paroleBoardDischargeDate,crime,class,crime,class,crime,class,crime,class\n'
 var inmateform = {
 	ID: {
@@ -135,62 +135,57 @@ const myClient = axios.create({
 });
 // const sample100res = fs.createWriteStream('sample100res.txt');
 
-(async() => {
 
+
+(async () => {
 	const outcsv = fs.createWriteStream('out.csv');
 	outcsv.write(csvHeader);
-	const pqueue = new PQueue({concurrency: 200, autoStart: true});
-	
-	// const din18A = DIN(2018,'A',4900,9999);
-
-	var count = 0;
 	console.time('test');
 	for (let year = 2018; year < 2019; year++) {
 		for (let r = 0; r < receptionCenterCodes.length; r++) {
-			const din18 = DIN(2018,receptionCenterCodes.charAt(r),4900,4950);
-			var missed = new Array();
-			for (const d of din18) {
-				count++;
-				(async () => {
-					try {
-						console.log('adding',d)
-						var s = await pqueue.add(async () => fetchDINResponse(d));
-						// var s = await fetchDINResponse(d);
-						var parseResult = parseHTML(s.data,d);
-						if (parseResult.success) {
-							outcsv.write(parseResult.csv)					
-							console.log(d,' data written to csv')
-						} else {
-							missed.push(parseInt(d.slice(-4)));
-							missed.sort((a,b) => b-a);
-							if (missed.length >= 5 && missed[0] - missed[5] < 10) {
-								
-							}
-							// console.log(missed)
-						}
-					} catch (err) {
-						console.log(err.message);
-						return;
+			for (let offset = 0; offset < 9999; offset += 100) {
+				var prefix = year.toString().slice(-2) + receptionCenterCodes.charAt(r);
+				var fetchPromises = [...Array(100)].map((_,i) => {
+					if (offset >= 1000) {
+						var din = prefix + (offset+i+1);
+					} else {
+						var din = prefix + (offset+i+1).toString().padStart(4,'0');
 					}
-				})();
-				if (count == 2000) {
+					return scrapeDIN(din);
+				});
+				console.timeLog('test');
+				var fetched = await Promise.all(fetchPromises);
+				console.timeLog('test');
+				var csvs = '';
+				var m = new Array();
+				fetched.forEach((res,i) => {
+					if (res) {
+						csvs += res;
+					} else {
+						m.push(i);
+					}
+				});
+				console.timeLog('test');
+				outcsv.write(csvs);
+				console.timeLog('test');
+				if (m.length >= 5 && m[m.length-1] == 99 && m[m.length-5] == 95) {
 					break;
 				}
 			}
 		}
 	}
-	(async () => {
-		console.log(`Size: ${pqueue.size}  Pending: ${pqueue.pending}`);
-		await pqueue.onIdle();
-		console.timeEnd('test');
-	})();
-
+	console.timeLog('test');
 })();
 
-// function handleDINResponse(res,din) {
-// 	var parsed = parseHTML(res.data, din);
-// 	return flattenCSV(parsed);
-// }
+async function scrapeDIN(din) {
+	try {
+		var res = await fetchDINResponse(din);
+		return parseHTML(res.data, din);
+	} catch (err) {
+		console.error(err);
+		return null;
+	}
+}
 
 async function fetchDINResponse(DIN) {
 	var tries = 0;
@@ -209,7 +204,7 @@ async function fetchDINResponse(DIN) {
 			console.log("ERROR: " +err.code + " " +DIN);
 			if (tries >= retryTimes) {
 				console.log(retryTimes,' FAILED ')
-				throw new Error;
+				throw new Error('Failed after 5 fetch attempts');
 			} else {
 				console.log("RETRYING ", DIN)
 				return run();
@@ -220,15 +215,10 @@ async function fetchDINResponse(DIN) {
 };
 
 var parseHTML = function(html, din) {
-	var res = {
-		success: false,
-		csv: null
-	};
 	if (!/headers="t1a"/.test(html)) {
 		console.log(din,' not found: ',html.match(/<p class="err">(.*)<\/p>/)[1]);
-		return res;
+		return null;
 	}
-	res.success = true;
 	let $ = cheerio.load(html);
 	jsonframe($);
 	var inmate = $('#content').scrape(inmateform)
@@ -238,18 +228,7 @@ var parseHTML = function(html, din) {
 	for (let c of inmate.CRIME) {
 		c.crime = c.crime.replace(/,/g,' ')
 	}
-	res.csv = flattenCSV(inmate);
-	return res;
-}
-
-function* DIN(year,receptionCenterCode,start=1,end=9999) {
-	var din = year.toString().slice(-2) + receptionCenterCode;
-	for (var i = start; i < end; i++) {
-		if (i < 1000) {
-			i = i.toString().padStart(4,'0');
-		}
-		yield din + i.toString()
-	}
+	return flattenCSV(inmate);
 }
 
 var parseSentence = function(s) {
@@ -321,3 +300,12 @@ function flattenCsvProperties(data) {
     return result;
 }
 
+function* DIN(year,receptionCenterCode,start=1,end=9999) {
+	var din = year.toString().slice(-2) + receptionCenterCode;
+	for (var i = start; i < end; i++) {
+		if (i < 1000) {
+			i = i.toString().padStart(4,'0');
+		}
+		yield din + i.toString()
+	}
+}
