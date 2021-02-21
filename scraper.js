@@ -1,9 +1,7 @@
 let cheerio = require('cheerio');
 let jsonframe = require('jsonframe-cheerio');
 const axios = require('axios');
-var qs = require('qs');
 var fs = require('fs');
-const {default: PQueue} = require('p-queue');
 var sleep = require('sleep');
 var http = require('http');
 var https = require('https');
@@ -127,6 +125,7 @@ var inmateformSentence = {
 };
 const myClient = axios.create({
   baseURL: url,
+  timeout: 2000,
   headers: {
             'Connection': 'keep-alive',
             'Accept-Encoding': '',
@@ -145,6 +144,7 @@ const myClient = axios.create({
 		for (let r = 0; r < receptionCenterCodes.length; r++) {
 			for (let offset = 0; offset < 9999; offset += 100) {
 				var prefix = year.toString().slice(-2) + receptionCenterCodes.charAt(r);
+				console.time('fetch100');
 				var fetchPromises = [...Array(100)].map((_,i) => {
 					if (offset >= 1000) {
 						var din = prefix + (offset+i+1);
@@ -153,9 +153,8 @@ const myClient = axios.create({
 					}
 					return scrapeDIN(din);
 				});
-				console.timeLog('test');
 				var fetched = await Promise.all(fetchPromises);
-				console.timeLog('test');
+				console.timeEnd('fetch100');
 				var csvs = '';
 				var m = new Array();
 				fetched.forEach((res,i) => {
@@ -165,12 +164,11 @@ const myClient = axios.create({
 						m.push(i);
 					}
 				});
-				console.timeLog('test');
 				outcsv.write(csvs);
-				console.timeLog('test');
 				if (m.length >= 5 && m[m.length-1] == 99 && m[m.length-5] == 95) {
 					break;
 				}
+				console.timeLog('test');
 			}
 		}
 	}
@@ -187,26 +185,25 @@ async function scrapeDIN(din) {
 	}
 }
 
-async function fetchDINResponse(DIN) {
+async function fetchDINResponse(din) {
 	var tries = 0;
 	var retryTimes = 5;
-	console.log("fetching",DIN)
 	async function run() {
 		try {
 			const data = {
 				K01: 'WINQ120',
-				M12_SEL_DINI: DIN
+				M12_SEL_DINI: din
 			};
 			var res = await myClient.post('', new URLSearchParams(data));
 			return res;
 		} catch (err) {
 			tries++;
-			console.log("ERROR: " +err.code + " " +DIN);
+			console.log("ERROR: " +err.code + " " +din);
 			if (tries >= retryTimes) {
-				console.log(retryTimes,' FAILED ')
+				console.log(retryTimes,' TRIES FAILED ', din)
 				throw new Error('Failed after 5 fetch attempts');
 			} else {
-				console.log("RETRYING ", DIN)
+				console.log("RETRYING ", din)
 				return run();
 			}
 		}
