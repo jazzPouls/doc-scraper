@@ -58,17 +58,18 @@ var inmateform = {
 };
 const myClient = axios.create({
   baseURL: url,
-  timeout: 10000,
+  timeout: 10,
   headers: {
             'Connection': 'keep-alive',
             'Accept-Encoding': '',
             'Accept-Language': 'en-US,en;q=0.8'
         }
 });
+var FAILED_FETCHES = new Array();
 
 (async () => {
 	console.time('test');
-	for (let year = 2017; year > 2016; year--) {
+	for (let year = 2016; year > 2010; year--) {
 		var date = new Date(); 
 		var time = "@"  
                 + date.getHours() + ":"  
@@ -79,7 +80,7 @@ const myClient = axios.create({
 		for (let r = 0; r < receptionCenterCodes.length; r++) {
 			var prefix = year.toString().slice(-2) + receptionCenterCodes.charAt(r);
 			for (let offset = 0; offset < 9999; offset += 100) {
-				console.time('fetch100');
+				// console.time('fetch100');
 				var fetchPromises = [...Array(100)].map((_,i) => {
 					if (offset >= 1000) {
 						var din = prefix + (offset+i+1);
@@ -89,7 +90,7 @@ const myClient = axios.create({
 					return scrapeDIN(din);
 				});
 				var fetched = await Promise.all(fetchPromises);
-				console.timeEnd('fetch100');
+				// console.timeEnd('fetch100');
 				var csvs = '';
 				var m = new Array();
 				fetched.forEach((res,i) => {
@@ -100,14 +101,16 @@ const myClient = axios.create({
 					}
 				});
 				outcsv.write(csvs);
+				console.timeLog('test');
 				if (m.length >= 5 && m[m.length-1] == 99 && m[m.length-5] == 95) {
+					console.log(`end of ${prefix} found`)
 					break;
 				}
-				console.timeLog('test');
 				await sleep(500);
 			}
 		}
 	}
+	console.log(FAILED_FETCHES)
 })();
 
 async function scrapeDIN(din) {
@@ -123,22 +126,29 @@ async function scrapeDIN(din) {
 async function fetchDINResponse(din) {
 	var tries = 0;
 	var retryTimes = 5;
+	var touts = [10000,20000,60000,100000,100000];
 	async function run() {
 		try {
 			const data = {
 				K01: 'WINQ120',
 				M12_SEL_DINI: din
 			};
-			var res = await myClient.post('', new URLSearchParams(data));
+			var res = await myClient.post('', new URLSearchParams(data), {timeout: touts[tries]});
 			return res;
 		} catch (err) {
 			tries++;
-			console.log("ERROR: " +err.code + " " +din);
+			console.log("ERROR: " + err.code + " " +din);
 			if (tries >= retryTimes) {
 				console.log(retryTimes,' TRIES FAILED ', din)
+				FAILED_FETCHES.push(din);
 				throw new Error('Failed after 5 fetch attempts');
 			} else {
-				console.log("RETRYING ", din)
+				if (err.code == 'ECONNABORTED') {
+					// console.log(`RETRYING ${din} with longgggg timeout`)
+					console.log(`RETRYING ${din} with timeout ${touts[tries]}ms`)
+				} else {
+					console.log("RETRYING ", din)
+				}
 				return run();
 			}
 		}
@@ -148,11 +158,11 @@ async function fetchDINResponse(din) {
 
 var parseHTML = function(html, din) {
 	if (!/headers="t1a"/.test(html)) {
-		console.log(din,' not found: ',html.match(/<p class="err">(.*)<\/p>/)[1]);
+		// console.log(din,' not found: ',html.match(/<p class="err">(.*)<\/p>/)[1]);
 		return null;
 	}
 	if (/NOT ON LOCATOR/.test(html)) {
-		console.log(din,' not found: ** NOT ON LOCATOR **');
+		// console.log(din,' not found: ** NOT ON LOCATOR **');
 		return null;
 	}
 	let $ = cheerio.load(html);
@@ -183,7 +193,7 @@ var flattenCSV = function(data) {
     var result = '';
     function recurse(cur) {
     	if (Object(cur) !== cur) {
-			if (/  /.test(cur)) {
+			if (!cur || /  /.test(cur) || /^\s*$/.test(cur)) {
                 result += ",";
             } else {
                 result += cur + ",";
