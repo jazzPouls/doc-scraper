@@ -247,7 +247,11 @@ var flattenCSV = function(data) {
     var result = '';
     function recurse(cur) {
     	if (Object(cur) !== cur) {
-    		result += cur + ',';
+			if (/  /.test(cur)) {
+                result += ",";
+            } else {
+                result += cur + ",";
+            }
     	} else if (Array.isArray(cur)) {
     		if (cur.length == 0) {
     			result += ',';
