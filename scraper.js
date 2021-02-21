@@ -10,7 +10,7 @@ https.globalAgent.maxSockets = 10;
 var url = 'http://nysdoccslookup.doccs.ny.gov/GCA00P00/WIQ2/WINQ120';
 var receptionCenterCodes = 'ABDGR';
 // var fullReceptionCenterCodes = 'ABCDEGHIJNPRSTXY';
-var csvHeader = 'DIN,name,sex,DOB,race,custodyStatus,housing,dateReceivedOriginal,dateReceivedCurrent,admissionType,county,latestReleaseDate,minSentence,maxSentence,earliestRelaseDate,earliestRelaseType,paroleHearingDate,paroleHearingType,paroleEligibilityDate,conditionalReleaseDate,maxExpirationDate,maxExpirationDateParole,postReleaseMaxExpiration,paroleBoardDischargeDate,crime1,class1,crime2,class2,crime3,class3,crime4,class4\n'
+var csvHeader = 'DIN,name,sex,DOB,race,custodyStatus,housing,dateReceivedOriginal,dateReceivedCurrent,admissionType,county,latestReleaseDate,latestReleaseType,minSentence,maxSentence,earliestRelaseDate,earliestRelaseType,paroleHearingDate,paroleHearingType,paroleEligibilityDate,conditionalReleaseDate,maxExpirationDate,maxExpirationDateParole,postReleaseMaxExpiration,paroleBoardDischargeDate,crime1,class1,crime2,class2,crime3,class3,crime4,class4\n'
 var inmateform = {
 	ID: {
 		_s:"table:eq(0)",
@@ -56,7 +56,6 @@ var inmateform = {
 };
 const myClient = axios.create({
   baseURL: url,
-  timeout: 10,
   headers: {
             'Connection': 'keep-alive',
             'Accept-Encoding': '',
@@ -170,12 +169,20 @@ function parseHTML(html, din) {
 	jsonframe($);
 	var inmate = $('#content').scrape(inmateform)
 	inmate.ID.name = inmate.ID.name.replace(/(.*),\s*(.*)/,'$2 $1')
+	inmate.ID.latestReleaseDate = parseLatestReleaseDate(inmate.ID.latestReleaseDate);
 	inmate.SENTENCE.minSentence = parseSentence(inmate.SENTENCE.minSentence)
 	inmate.SENTENCE.maxSentence = parseSentence(inmate.SENTENCE.maxSentence)
 	for (let c of inmate.CRIME) {
 		c.crime = c.crime.replace(/,/g,' ')
 	}
 	return flattenCSV(inmate);
+}
+
+function parseLatestReleaseDate(s) {
+	if (s.length < 6) {
+		return ',';
+	}
+	return s.replace(/\s/,',')
 }
 
 function parseSentence(s) {
