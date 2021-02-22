@@ -9,7 +9,6 @@ https.globalAgent.maxSockets = 10;
 
 var url = 'http://nysdoccslookup.doccs.ny.gov/GCA00P00/WIQ2/WINQ120';
 var receptionCenterCodes = 'ABDGR';
-// var fullReceptionCenterCodes = 'ABCDEGHIJNPRSTXY';
 var csvHeader = 'DIN,name,sex,DOB,race,custodyStatus,housing,dateReceivedOriginal,dateReceivedCurrent,admissionType,county,latestReleaseDate,latestReleaseType,minSentence,maxSentence,earliestRelaseDate,earliestRelaseType,paroleHearingDate,paroleHearingType,paroleEligibilityDate,conditionalReleaseDate,maxExpirationDate,maxExpirationDateParole,postReleaseMaxExpiration,paroleBoardDischargeDate,crime1,class1,crime2,class2,crime3,class3,crime4,class4\n'
 var inmateform = {
 	ID: {
@@ -62,8 +61,8 @@ const myClient = axios.create({
             'Accept-Language': 'en-US,en;q=0.8'
         }
 });
-var FAILED_FETCHES = new Array();
 
+var FAILED_FETCHES = new Array();
 (async () => {
 	for (let year = 2020; year >= 2000; year--) {
 		console.time('test');
@@ -78,7 +77,6 @@ var FAILED_FETCHES = new Array();
 		for (let r = 0; r < receptionCenterCodes.length; r++) {
 			var prefix = year.toString().slice(-2) + receptionCenterCodes.charAt(r);
 			for (let offset = 0; offset < 9999; offset += 100) {
-				// console.time('fetch100');
 				var fetchPromises = [...Array(100)].map((_,i) => {
 					if (offset >= 1000) {
 						var din = prefix + (offset+i+1);
@@ -88,41 +86,47 @@ var FAILED_FETCHES = new Array();
 					return scrapeDIN(din);
 				});
 				var fetched = await Promise.all(fetchPromises);
-				// console.timeEnd('fetch100');
 				var csvs = '';
-				var m = new Array();
+				var misses = new Array();
 				fetched.forEach((res,i) => {
 					if (res) {
 						csvs += res;
 					} else {
-						m.push(i);
+						misses.push(i);
 					}
 				});
 				outcsv.write(csvs);
 				
-				if (m.length >= 5 && m[m.length-1] == 99 && m[m.length-5] == 95) {
+				if (misses.length >= 5 && misses[misses.length-1] == 99 && misses[misses.length-5] == 95) {
 					break;
 				}
 				await sleep(500);
 			}
 		}
 		console.timeEnd('test');
-		console.log(FAILED_FETCHES);
 		await sleep(60000);
 	}
-	console.log(FAILED_FETCHES);
+	if (FAILED_FETCHES) {
+		console.log(FAILED_FETCHES);
+	}
 })();
 
+// input: din number
+// return: csv representation of din's data
 async function scrapeDIN(din) {
 	try {
 		var res = await fetchDINResponse(din);
-		return parseHTML(res.data, din);
+		return parseHTML(res.data);
 	} catch (err) {
 		console.error(err);
+		FAILED_FETCHES.push(din);
 		return null;
 	}
 }
 
+// input: din number
+// try fetching res, 5 retries with increasing timeouts
+// return: http response from NYDOC server
 async function fetchDINResponse(din) {
 	var tries = 0;
 	var retryTimes = 5;
@@ -137,16 +141,10 @@ async function fetchDINResponse(din) {
 			return res;
 		} catch (err) {
 			tries++;
-			// console.log("ERROR: " + err.code + " " +din);
 			if (tries >= retryTimes) {
-				console.log(retryTimes,' TRIES FAILED ', din)
-				FAILED_FETCHES.push(din);
-				throw new Error('Failed after 5 fetch attempts');
+				throw new Error(`Fetching ${din} failed after ${retryTimes} attempts`);
 			} else {
-				if (err.code == 'ECONNABORTED') {
-					// console.log(`RETRYING ${din} with longgggg timeout`)
-					// console.log(`RETRYING ${din} with timeout ${touts[tries]}ms`)
-				} else {
+				if (err.code != 'ECONNABORTED') {
 					console.log(`ERROR: ${err.code} RETRYING ${din}`);
 				}
 				return run();
@@ -156,13 +154,11 @@ async function fetchDINResponse(din) {
 	return run();
 };
 
-function parseHTML(html, din) {
-	if (!/headers="t1a"/.test(html)) {
-		// console.log(din,' not found: ',html.match(/<p class="err">(.*)<\/p>/)[1]);
-		return null;
-	}
-	if (/NOT ON LOCATOR/.test(html)) {
-		// console.log(din,' not found: ** NOT ON LOCATOR **');
+// input: html response from NYDOC server
+// parse data into json, reformat data, flatten to csv
+// return: csv representation of din's data
+function parseHTML(html) {
+	if (!/headers="t1a"/.test(html) || /NOT ON LOCATOR/.test(html)) {
 		return null;
 	}
 	let $ = cheerio.load(html);
@@ -178,6 +174,8 @@ function parseHTML(html, din) {
 	return flattenCSV(inmate);
 }
 
+// input: latestReleaseDate in form "MM/DD/YYYY RELEASETYPE"
+// return: date and type split by comma (return 1 comma if empty)
 function parseLatestReleaseDate(s) {
 	if (s.length < 6) {
 		return ',';
@@ -185,6 +183,8 @@ function parseLatestReleaseDate(s) {
 	return s.replace(/\s/,',')
 }
 
+// input: sentence in form "YYYY Years, MM Months, DD Days"
+// return: decimal equiv. sentence (LIFE => return 100, invalid => return undefined)
 function parseSentence(s) {
 	if (/LIFE/.test(s)) {
 		return 100;
@@ -192,13 +192,15 @@ function parseSentence(s) {
 	var nums = /\d+/g
 	var num = s.match(nums)
 	if (!num || num.length != 3) {
-		return;
+		return null;
 	}
 	var dur = parseInt(num[0]) + parseInt(num[1])/12 + parseInt(num[2])/365;
 	dur = Math.floor((dur*100))/100;
 	return dur
 }
 
+// input: inmate data in JSON format
+// return: data flattened and seperated by commas
 var flattenCSV = function(data) {
     var result = '';
     function recurse(cur) {
@@ -209,13 +211,9 @@ var flattenCSV = function(data) {
                 result += cur + ",";
             }
     	} else if (Array.isArray(cur)) {
-    		if (cur.length == 0) {
-    			result += ',';
-    		} else {
-    			for (let i of cur) {
-    				recurse(i);
-    			}
-    		}
+			for (let i of cur) {
+				recurse(i);
+			}
     	} else {
     		var isEmpty = true;
 			for (let p in cur) {
@@ -227,12 +225,14 @@ var flattenCSV = function(data) {
 			}
 		}
     }
-    recurse(data, "");
+    recurse(data);
     result = result.slice(0, -1)
     result += '\n'
     return result;
 }
 
+// input: ms to wait
+// return: Promise resolved in ms time
 function sleep(ms) {
 	return new Promise((resolve) => {
 		setTimeout(resolve, ms);
