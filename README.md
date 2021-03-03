@@ -1,4 +1,5 @@
 # doc-scraper
+## Scraper that collects all NY DOC incarceration records since 1979
  
 Scrapes NYDOC [inmate lookup](http://nysdoccslookup.doccs.ny.gov/) and saves all available records to csv  
 Iterates over all valid Department Identification Numbers (DIN), posting request to DOC server and parsing html response
